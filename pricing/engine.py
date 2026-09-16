@@ -134,7 +134,7 @@ def price_booking(
     config: PricingConfig = DEFAULT_CONFIG,
 ) -> BillBreakdown:
     """Price `quantity` tickets of one tier, after availability checks."""
-    if quantity <= 0:
+    if not isinstance(quantity, int) or isinstance(quantity, bool) or quantity <= 0:
         raise PricingError("Quantity must be a positive integer")
     if tier_name not in tiers:
         raise PricingError(f"Unknown tier: {tier_name}")
