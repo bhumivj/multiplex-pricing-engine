@@ -35,6 +35,67 @@ agreed as defaults and are configurable in one place: `PricingConfig` in
 | Rounding | Round-half-up to nearest paisa, applied at each step |
 | Availability | Integer `available_seats` per tier; tier bookable only if > 0 |
 
+## Messy Price List Import
+A separate importer (`pricing/importer.py`) cleans a raw, messy seat-class
+price list before it's used by the pricing engine.
+
+### Supported Price Formats
+- `150`
+- `150.00`
+- `₹150`
+- `₹150.00`
+(Commas are also stripped, e.g. `₹1,500.00`.)
+
+### Case-Insensitive Tier Normalization
+Tier names are normalized with `.strip().title()`, so `"gold"`, `"GOLD"`,
+and `"Gold"` are all treated as the same tier (`"Gold"`).
+
+### Rejection Rules
+A record is rejected, with a reason, if:
+- the tier name is blank
+- the price is blank/missing
+- the price is negative
+- the price is not a parseable number/currency format
+
+### Duplicate Handling
+When the same tier name (case-insensitive) appears more than once:
+- **Same price** → later entries are logged as duplicates and ignored.
+- **Conflicting price** → later entries are logged as duplicates and
+  rejected; the **first valid price seen is kept** (see REASONING.md for
+  why this default was chosen).
+
+### Import Report
+Every import produces an `ImportReport` with:
+- `imported` — records successfully cleaned and kept
+- `duplicates` — records ignored/rejected for being duplicates, with reason
+- `rejected` — records rejected for bad data, with reason
+- `cleaned_prices` — final `{tier_name: Decimal(price)}` dict
+
+### Running the Importer
+```bash
+python3 -c "
+from pricing.importer import import_price_list
+
+messy_data = [
+    {'name': 'Silver', 'price': '150'},
+    {'name': 'SILVER', 'price': '150.00'},
+    {'name': 'gold', 'price': '₹250'},
+    {'name': 'Gold', 'price': '300'},
+    {'name': 'Recliner', 'price': ''},
+    {'name': 'VIP', 'price': '-50'},
+    {'name': 'Balcony', 'price': 'abc'},
+]
+
+report = import_price_list(messy_data)
+print('Cleaned:', report.cleaned_prices)
+print('Imported:', report.imported)
+print('Duplicates:', report.duplicates)
+print('Rejected:', report.rejected)
+"
+```
+
+### Example Output
+
 ## Technology
 - Python 3.10+
 - `pytest` for testing

@@ -100,12 +100,65 @@ cases (exact remaining seats, single ticket, large quantity).
 - Non-integer and boolean quantities
 - Large quantity bookings (100 tickets)
 
+
+## Importer Design (separate from pricing logic)
+`pricing/importer.py` only cleans raw input and produces a report — it has
+no pricing math and never touches `PricingConfig` directly. This keeps
+"parsing messy external data" and "calculating a bill" as two independent
+responsibilities: a change to import rules (e.g. new price formats) can
+never accidentally affect a GST or discount calculation, and vice versa.
+
+## Normalization Strategy
+Tier names are normalized with `.strip().title()` so casing differences
+("gold", "GOLD", "Gold") collapse to one canonical form. Prices are
+normalized by stripping the `₹` symbol and commas, then parsed as
+`Decimal`.
+
+## Exact Money Handling
+Prices are parsed directly into `Decimal` from a cleaned string, never
+`float`, and quantized to 2 decimal places on import — matching the same
+paisa-exact approach used in `pricing/engine.py`.
+
+## Validation / Rejection Strategy
+Each record is checked independently and categorized into exactly one of
+three buckets: imported, duplicate, or rejected — with a plain-text reason
+attached to every duplicate/rejected record, so the report is self-explanatory
+without reading code.
+
+## Duplicate Handling Rule (assumption)
+**Not specified by the assessment:** what to do when the same tier
+appears twice with different valid prices.
+**Assumption applied:** first valid occurrence wins, deterministically,
+based on input order — not on which price is higher/lower. Same-price
+repeats are logged as ignored duplicates; conflicting-price repeats are
+logged as rejected duplicates, and the first price is retained. This rule
+lives entirely inside `import_price_list` and can be swapped (e.g. to
+"last wins" or "reject both") without touching the pricing engine.
+
+## Feeding the Pricing Engine
+`ImportReport.cleaned_prices` is a plain `Dict[str, Decimal]` — the exact
+type `PricingConfig.tier_prices` already expects. No adapter or conversion
+step is needed; cleaned prices replace the hard-coded defaults directly
+(demonstrated in `test_cleaned_prices_plug_into_pricing_engine`).
+
+## Testing Strategy for the Importer
+15 tests cover: valid records, case-insensitive duplicate merging,
+same-price duplicates, conflicting-price duplicates, all four supported
+price formats (plain, decimal, ₹, ₹ with decimals), each rejection reason
+(blank, missing key, negative, invalid format), mixed valid/invalid batches,
+empty input, exact structure of the cleaned price list, full report
+categorization (every input record ends up in exactly one bucket), and
+direct integration with the pricing engine.
+
 ## Assumptions (values not specified in the original problem statement)
 Tier prices, festival discount amount, member discount percentage and cap,
 discount order, convenience fee amount, GST rate and taxable base, and the
 rounding rule were all unspecified. Defaults were proposed, confirmed
 explicitly, and stored as one configurable block rather than hard-coded
 into logic — see the "Business Rules" table in README.md.
+- The duplicate-conflict rule for the price-list importer (first valid
+  occurrence wins) was also not specified and was fixed as a deterministic
+  default — see "Duplicate Handling Rule" above.
 
 ## Limitations
 - No persistence layer; seat availability must be supplied by the caller
